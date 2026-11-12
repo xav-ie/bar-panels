@@ -2,7 +2,9 @@
 // hidden from screen capture, opened under the item by a notification (an
 // app's CLI posts it), closed on a click outside or a swallowed bar click. It
 // lays its rows out top-down on glass and animates every change to them, and
-// talks to a bundled helper over JSON lines.
+// talks to a bundled helper over JSON lines. It takes the keyboard while
+// open: arrows and Tab move focus over its rows and controls, Space and Return
+// act, Escape closes.
 
 import AppKit
 
@@ -26,9 +28,16 @@ public let menuPanelSharingType: NSWindow.SharingType =
 public let demoMode = ProcessInfo.processInfo.environment["SCREENSHARE_UI_DEMO"] == "1"
 
 open class BarPanel: NSObject {
-  public let panel = NSPanel(
+  public let panel: NSPanel = KeyPanel(
     contentRect: NSRect(x: 0, y: 0, width: PANEL_W, height: 40),
     styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+  /// Keyboard focus, by the key that identifies its view across rebuilds
+  /// (see focusTargets()). Shown only once a key is pressed, and dropped as
+  /// soon as the pointer moves, like a menu.
+  private var focusKey: String?
+  private var focusIndex = 0
+  private var keyboardActive = false
+  private let ring = FocusRing(frame: .zero)
   private var clickMonitor: Any?
   private var pressMonitor: Any?
   private var lastMonitorClose: Date?  // when a click outside last closed the panel
@@ -91,6 +100,8 @@ open class BarPanel: NSObject {
     panel.backgroundColor = .clear
     panel.isOpaque = false
     panel.hasShadow = true  // what sets a light panel apart from a white page
+    panel.acceptsMouseMovedEvents = true
+    (panel as? KeyPanel)?.owner = self
 
     DistributedNotificationCenter.default().addObserver(
       forName: toggle, object: nil, queue: .main
@@ -130,6 +141,8 @@ open class BarPanel: NSObject {
   public func openPanel(anchorX: CGFloat?) {
     isOpen = true
     generation += 1
+    keyboardActive = false
+    focusKey = nil
     let opening = generation
     willOpen()
     clickMonitor = NSEvent.addGlobalMonitorForEvents(
@@ -173,6 +186,8 @@ open class BarPanel: NSObject {
     applyFrame()
     panel.alphaValue = 0
     panel.orderFrontRegardless()
+    // Key, without activating the app: keys come here, not to the app behind.
+    panel.makeKey()
     NSAnimationContext.runAnimationGroup { ctx in
       ctx.duration = Self.openDuration
       panel.animator().alphaValue = 1
@@ -220,6 +235,7 @@ open class BarPanel: NSObject {
     for m in [clickMonitor, pressMonitor].compactMap({ $0 }) { NSEvent.removeMonitor(m) }
     clickMonitor = nil
     pressMonitor = nil
+    keyboardActive = false
     didClose()
     guard panel.isVisible else { return }
     NSAnimationContext.runAnimationGroup { ctx in
@@ -242,6 +258,142 @@ open class BarPanel: NSObject {
     var v = root.hitTest(root.superview?.convert(p, from: nil) ?? p)
     while let view = v, !(view is HoverRow) { v = view.superview }
     return v as? HoverRow
+  }
+
+  // MARK: Keyboard
+
+  /// A key pressed while the panel is open; true if it was handled. Arrows and
+  /// Tab move focus, Space and Return act on it, right and left open and
+  /// close a focused disclosure row or nudge a focused slider, Escape and ⌘W
+  /// close. Panels can override to add keys,
+  /// calling super for the rest.
+  open func handleKey(_ e: NSEvent) -> Bool {
+    let shift = e.modifierFlags.contains(.shift)
+    switch e.keyCode {
+    case 53: closePanel()  // Escape
+    case 13 where e.modifierFlags.contains(.command): closePanel()  // ⌘W
+    case 48: moveFocus(shift ? -1 : 1)  // Tab
+    case 125: moveFocus(1)  // down
+    case 126: moveFocus(-1)  // up
+    case 49, 36, 76:  // Space, Return, Enter
+      guard keyboardActive, let v = focusedView() else { return false }
+      activate(v)
+    case 123, 124:  // left, right
+      let right = e.keyCode == 124
+      guard keyboardActive else { return false }
+      switch focusedView() {
+      case let row as HoverRow where row.expanded == !right:
+        row.onClick?()
+      case let s as NSSlider:
+        s.doubleValue += (s.maxValue - s.minValue) / 20 * (right ? 1 : -1)
+        s.sendAction(s.action, to: s.target)
+      default: return false
+      }
+    default: return false
+    }
+    return true
+  }
+
+  /// Show keyboard focus on `view` (a row, or a control inside one), as if
+  /// it had been reached with the arrows; nil drops it.
+  public func setKeyboardFocus(_ view: NSView?) {
+    let target = view.flatMap { v in focusTargets().first { $0.view === v } }
+    keyboardActive = target != nil
+    focusKey = target?.key
+    showFocus()
+  }
+
+  /// The pointer moved or pressed: it drives the panel again.
+  fileprivate func pointerTookOver() {
+    guard keyboardActive else { return }
+    keyboardActive = false
+    showFocus()
+    content?.rows.compactMap { $0 as? HoverRow }.forEach { $0.syncHover() }
+  }
+
+  /// What can take focus in the current content, top to bottom: rows that do
+  /// something, and enabled controls inside the other views. Each is keyed by
+  /// its row's key (stable across rebuilds), plus its place within the row.
+  private func focusTargets() -> [(key: String, view: NSView)] {
+    guard let content else { return [] }
+    var out: [(String, NSView)] = []
+    for (key, view, _) in Self.keyed(content.rows) where !view.isHidden {
+      if let row = view as? HoverRow {
+        if row.isEnabled, row.onClick != nil { out.append((key, row)) }
+        continue
+      }
+      var controls: [NSControl] = []
+      func visit(_ v: NSView) {
+        if let c = v as? NSControl, !(c is NSTextField), !(c is NSLevelIndicator) {
+          if c.isEnabled, !c.isHiddenOrHasHiddenAncestor { controls.append(c) }
+          return
+        }
+        v.subviews.forEach(visit)
+      }
+      visit(view)
+      // Reading order within the view: top to bottom, then left to right.
+      let frame = { (c: NSControl) in c.convert(c.bounds, to: view) }
+      controls.sort { a, b in
+        let fa = frame(a), fb = frame(b)
+        return abs(fa.midY - fb.midY) < 6 ? fa.minX < fb.minX : (fa.midY < fb.midY) == view.isFlipped
+      }
+      for (i, c) in controls.enumerated() { out.append(("\(key)/\(i)", c)) }
+    }
+    return out
+  }
+
+  private func focusedView() -> NSView? {
+    focusTargets().first { $0.key == focusKey }?.view
+  }
+
+  private func moveFocus(_ step: Int) {
+    let targets = focusTargets()
+    guard !targets.isEmpty else { return }
+    let current =
+      targets.firstIndex { $0.key == focusKey }
+      // Gone in a rebuild: carry on from where it was.
+      ?? (focusKey == nil ? nil : min(focusIndex, targets.count - 1) - (step > 0 ? 1 : 0))
+    let next: Int
+    if keyboardActive, let current {
+      next = (current + step + targets.count) % targets.count
+    } else {
+      // The first key press shows focus: on the row under the pointer if
+      // there is one, else at the top or bottom.
+      let hovered = rowUnderPointer().flatMap { row in targets.firstIndex { $0.view === row } }
+      next = hovered ?? (step > 0 ? 0 : targets.count - 1)
+    }
+    focusKey = targets[next].key
+    keyboardActive = true
+    showFocus()
+    NSAccessibility.post(element: targets[next].view, notification: .focusedUIElementChanged)
+  }
+
+  private func activate(_ v: NSView) {
+    switch v {
+    case let row as HoverRow: row.onClick?()
+    case let s as NSSwitch:
+      s.state = s.state == .on ? .off : .on
+      s.sendAction(s.action, to: s.target)
+    case let c as NSControl: c.performClick(nil)  // buttons, checkboxes, popups
+    default: break
+    }
+  }
+
+  /// Highlight the focused row or ring the focused control; while the
+  /// pointer drives the panel, rows go back to following it.
+  private func showFocus() {
+    let targets = focusTargets()
+    let i = keyboardActive ? targets.firstIndex { $0.key == focusKey } : nil
+    if let i { focusIndex = i }
+    let focused = i.map { targets[$0].view }
+    for row in content?.rows.compactMap({ $0 as? HoverRow }) ?? [] {
+      row.focused = keyboardActive ? row === focused : nil
+    }
+    if let control = focused, !(control is HoverRow), let host = ring.superview {
+      ring.show(around: control, in: host)
+    } else {
+      ring.isHidden = true
+    }
   }
 
   // MARK: Content
@@ -324,6 +476,7 @@ open class BarPanel: NSObject {
 
     let host = hostView(height: height)
     host.addSubview(next)
+    host.addSubview(ring)  // over the content
     let previous = content
     content = next
 
@@ -331,6 +484,7 @@ open class BarPanel: NSObject {
       previous?.removeFromSuperview()
       shownHeight = height
       applyFrame()
+      showFocus()
       return
     }
 
@@ -388,6 +542,7 @@ open class BarPanel: NSObject {
         let e = edge()
         next.setEdge(e)
         self.retiring.forEach { $0.setEdge(e) }
+        self.showFocus()
       },
       settled: { [weak self] in
         guard let self else { return }
@@ -395,7 +550,9 @@ open class BarPanel: NSObject {
         retiring = []
         content.map { $0.setEdge($0.footerTop) }
         content?.rows.compactMap { $0 as? HoverRow }.forEach { $0.syncHover() }
+        showFocus()
       })
+    showFocus()
   }
 
   /// Damped-spring progress at `t` seconds: 0 → 1, overshooting a little.
@@ -567,5 +724,20 @@ public final class HelperProcess {
     p.arguments = arguments
     p.terminationHandler = { p in DispatchQueue.main.async { done(p.terminationStatus) } }
     do { try p.run() } catch { done(-1) }
+  }
+}
+
+/// The panel's window: it can take the keyboard (a borderless panel can't by
+/// default) and hands keys to its BarPanel before the views see them.
+final class KeyPanel: NSPanel {
+  weak var owner: BarPanel?
+  override var canBecomeKey: Bool { true }
+  override func sendEvent(_ event: NSEvent) {
+    switch event.type {
+    case .keyDown where owner?.handleKey(event) == true: return
+    case .mouseMoved, .leftMouseDown, .rightMouseDown: owner?.pointerTookOver()
+    default: break
+    }
+    super.sendEvent(event)
   }
 }

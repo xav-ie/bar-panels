@@ -1,6 +1,7 @@
 // An on/off switch for panel rows. Checkmarks are for picking one of several
 // options; a setting that is just on or off gets this. Drawn with layers rather
-// than NSSwitch, which a non-key panel (all of ours) draws gray.
+// than NSSwitch, which a panel draws gray whenever it isn't key (as it fades
+// out, say).
 
 import AppKit
 

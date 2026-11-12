@@ -13,11 +13,17 @@ public final class HoverRow: NSView {
   public var onClick: (() -> Void)?
   /// The row's title, which identifies it across a panel's rebuilds.
   public let title: String
-  /// Whether the row can be used (a disabled one is dimmed).
+  /// Disabled rows don't take keyboard focus.
   public let isEnabled: Bool
   /// A disclosure row (it shows or hides the rows under it): whether it's
-  /// open, or nil for any other row.
+  /// open, or nil for any other row. Right and left open and close it.
   public let expanded: Bool?
+  /// Keyboard focus, which the panel sets while the keyboard drives it: then
+  /// the focused row is highlighted rather than the one under the pointer.
+  /// nil while the pointer drives the panel.
+  public var focused: Bool? {
+    didSet { applyHighlight() }
+  }
   private let label = NSTextField(labelWithString: "")
   private let detailLabel = NSTextField(labelWithString: "")
   private let mark = NSImageView()
@@ -194,7 +200,7 @@ public final class HoverRow: NSView {
   // slab, so the glass underneath still reads through. Light in Dark Mode, dark
   // in Light Mode.
   private func applyHighlight() {
-    guard hovered else {
+    guard focused ?? hovered else {
       layer?.backgroundColor = NSColor.clear.cgColor
       return
     }
