@@ -334,8 +334,10 @@ open class BarPanel: NSObject {
       // Reading order within the view: top to bottom, then left to right.
       let frame = { (c: NSControl) in c.convert(c.bounds, to: view) }
       controls.sort { a, b in
-        let fa = frame(a), fb = frame(b)
-        return abs(fa.midY - fb.midY) < 6 ? fa.minX < fb.minX : (fa.midY < fb.midY) == view.isFlipped
+        let fa = frame(a)
+        let fb = frame(b)
+        return abs(fa.midY - fb.midY) < 6
+          ? fa.minX < fb.minX : (fa.midY < fb.midY) == view.isFlipped
       }
       for (i, c) in controls.enumerated() { out.append(("\(key)/\(i)", c)) }
     }
@@ -702,7 +704,8 @@ public final class HelperProcess {
       process = p
       input = stdin.fileHandleForWriting
     } catch {
-      FileHandle.standardError.write("screenshare-ui: \(name) failed: \(error)\n".data(using: .utf8)!)
+      FileHandle.standardError.write(
+        "screenshare-ui: \(name) failed: \(error)\n".data(using: .utf8)!)
     }
   }
 

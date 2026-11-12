@@ -109,10 +109,12 @@ public final class HoverRow: NSView {
     label.lineBreakMode = .byTruncatingTail
     // A trailing glyph (a lock, a disclosure chevron), right-aligned.
     let chevron = expanded.map {
-      NSImage(systemSymbolName: $0 ? "chevron.down" : "chevron.right", accessibilityDescription: nil)
+      NSImage(
+        systemSymbolName: $0 ? "chevron.down" : "chevron.right", accessibilityDescription: nil)
     }
     if let accessory = chevron ?? accessory {
-      let av = NSImageView(frame: NSRect(x: ROW_W - 8 - 12, y: (ROW_H - 12) / 2, width: 12, height: 12))
+      let av = NSImageView(
+        frame: NSRect(x: ROW_W - 8 - 12, y: (ROW_H - 12) / 2, width: 12, height: 12))
       av.image = accessory
       av.contentTintColor = SECONDARY_TEXT
       addSubview(av)
@@ -207,7 +209,8 @@ public final class HoverRow: NSView {
     // Light Mode's gray tint shows a dark wash far more than Dark Mode's black
     // shows a light one, so it's fainter there.
     let dark = isDark(effectiveAppearance)
-    layer?.backgroundColor = (dark ? NSColor.white : .black).withAlphaComponent(dark ? 0.3 : 0.12).cgColor
+    layer?.backgroundColor =
+      (dark ? NSColor.white : .black).withAlphaComponent(dark ? 0.3 : 0.12).cgColor
   }
   // Act on the press. A panel resizes itself every frame while it animates, and
   // AppKit drops a release that comes in meanwhile, so a click acted on at
