@@ -1,0 +1,72 @@
+name: Security
+
+# CodeQL code scanning, which needs a public repository (or GitHub Advanced
+# Security), so it only runs while this one is public.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * 1" # weekly, for newly published queries
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+jobs:
+  # These workflows.
+  codeql:
+    if: github.event.repository.visibility == 'public'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write # upload the results to code scanning
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: actions
+          build-mode: none
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: /language:actions
+
+  # The library and the previews, traced from a direct swiftc build: the Nix
+  # build runs in the daemon, out of CodeQL's sight. It calls the toolchain's
+  # swiftc, since the /usr/bin shim is SIP-protected and CodeQL can't trace
+  # through it, and builds for x86_64 with the SDK given: CodeQL's Swift bundle
+  # is x86_64, so its tracer runs the compiler under Rosetta and only sees an
+  # x86_64 build.
+  codeql-swift:
+    if: github.event.repository.visibility == 'public'
+    runs-on: macos-15
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write # upload the results to code scanning
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: swift
+          build-mode: manual
+      - name: Build the library and the previews
+        run: |
+          swiftc="$(xcrun --find swiftc)"
+          flags=(-target x86_64-apple-macos14 -sdk "$(xcrun --show-sdk-path)")
+          "$swiftc" "${flags[@]}" -parse-as-library -module-name BarPanels \
+            -emit-library -static -o "$RUNNER_TEMP/libBarPanels.a" \
+            -emit-module -emit-module-path "$RUNNER_TEMP/BarPanels.swiftmodule" \
+            Sources/BarPanels/*.swift
+          "$swiftc" "${flags[@]}" -I "$RUNNER_TEMP" -L "$RUNNER_TEMP" -lBarPanels \
+            Previews/main.swift -o "$RUNNER_TEMP/bar-panels-previews"
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: /language:swift
