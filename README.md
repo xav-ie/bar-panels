@@ -148,10 +148,11 @@ it; the flake has no inputs of its own for that reason.
 
 - **Clicks a status bar swallows.** A bar that keeps clicks on its items from
   reaching other apps (to stop them revealing the native menu bar) can post
-  `BAR_CLICKED` instead, and open panels close as if clicked away from.
-- **Screenshots of your own panels.** `SCREENSHARE_UI_CAPTURABLE=1` lets
-  screen capture see them, and `SCREENSHARE_UI_DEMO=1` is a flag your panels
-  can read to show fixed sample data.
+  `BarPanel.barClicked` (`bar-panels.bar-clicked`) instead, and open panels
+  close as if clicked away from.
+- **Screenshots of your own panels.** `BAR_PANELS_CAPTURABLE=1` lets
+  screen capture see them, and `BAR_PANELS_DEMO=1` sets `BarPanel.demoMode`, a
+  flag your panels can read to show fixed sample data.
 - **Helpers.** `HelperProcess` runs a bundled helper that reports state as one
   JSON line per change and takes commands on stdin.
 

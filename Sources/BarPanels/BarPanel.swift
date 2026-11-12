@@ -8,26 +8,24 @@
 
 import AppKit
 
-/// From a status bar that swallows clicks on its items (sketchybar-hoverd does,
-/// so they don't reveal the native menu bar): such a click never reaches the
-/// panels' click-outside monitors, so it's announced here instead and closes
-/// them the same way.
-/// ponytail: still named for screenshare-ui, where the panels started; renamed
-/// when this library is published.
-public let BAR_CLICKED = Notification.Name("com.x.screenshare-ui.bar-clicked")
-
-/// SCREENSHARE_UI_CAPTURABLE=1 lets screenshots and recordings see the menu
+/// BAR_PANELS_CAPTURABLE=1 lets screenshots and recordings see the menu
 /// panels (the bar panels and the Screenshare Mode panel), to check their
 /// layout and animations; otherwise they're hidden from capture like the rest.
 public let menuPanelSharingType: NSWindow.SharingType =
-  ProcessInfo.processInfo.environment["SCREENSHARE_UI_CAPTURABLE"] == "1" ? .readOnly : .none
-
-/// SCREENSHARE_UI_DEMO=1: panels show fixed, made-up data (networks, outputs)
-/// instead of the system's, and changes land after a short delay without
-/// touching anything, so recordings of them are the same every time.
-public let demoMode = ProcessInfo.processInfo.environment["SCREENSHARE_UI_DEMO"] == "1"
+  ProcessInfo.processInfo.environment["BAR_PANELS_CAPTURABLE"] == "1" ? .readOnly : .none
 
 open class BarPanel: NSObject {
+  /// From a status bar that swallows clicks on its items (sketchybar-hoverd
+  /// does, so they don't reveal the native menu bar): such a click never
+  /// reaches the panels' click-outside monitors, so it's announced here instead
+  /// and closes them the same way.
+  public static let barClicked = Notification.Name("bar-panels.bar-clicked")
+
+  /// BAR_PANELS_DEMO=1: panels show fixed, made-up data (networks, outputs)
+  /// instead of the system's, and changes land after a short delay without
+  /// touching anything, so recordings of them are the same every time.
+  public static let demoMode = ProcessInfo.processInfo.environment["BAR_PANELS_DEMO"] == "1"
+
   public let panel: NSPanel = KeyPanel(
     contentRect: NSRect(x: 0, y: 0, width: PANEL_W, height: 40),
     styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -111,7 +109,7 @@ open class BarPanel: NSObject {
     }
     // A bar click the status bar swallowed, which the click monitor can't see.
     DistributedNotificationCenter.default().addObserver(
-      forName: BAR_CLICKED, object: nil, queue: .main
+      forName: BarPanel.barClicked, object: nil, queue: .main
     ) { [weak self] _ in self?.dismiss() }
   }
 
